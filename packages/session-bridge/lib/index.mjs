@@ -1,5 +1,6 @@
 import { aggregateSessionStats, boardMessages, deliveryText, encodeSessionDir, lastSessionTitle, markDelivered, poll, recentMessages, rootDir, sanitizeId, send, unreadCount } from "./store.mjs";
 import { randomUUID } from "node:crypto";
+import { spawn } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -326,6 +327,89 @@ function apply(ctx) {
 			res.end(body);
 		}
 	}), "session-bridge: session-info route");
+	const heartbeats = /* @__PURE__ */ new Map();
+	const lastNotifyAt = /* @__PURE__ */ new Map();
+	const pendingCompletes = /* @__PURE__ */ new Map();
+	const NOTIFY_DEDUP_MS = 3e4;
+	const AWAY_MS = 3e4;
+	const COMPLETE_DELAY_MS = 6e3;
+	const notifyWindows = (title, text) => {
+		try {
+			const script = [
+				"Add-Type -AssemblyName System.Windows.Forms",
+				"Add-Type -AssemblyName System.Drawing",
+				"$n = New-Object System.Windows.Forms.NotifyIcon",
+				"$n.Icon = [System.Drawing.SystemIcons]::Information",
+				"$n.Visible = $true",
+				"$n.BalloonTipTitle = " + JSON.stringify(title),
+				"$n.BalloonTipText = " + JSON.stringify(text),
+				"$n.ShowBalloonTip(8000)",
+				"Start-Sleep -Seconds 10",
+				"$n.Dispose()"
+			].join("; ");
+			spawn("powershell", [
+				"-NoProfile",
+				"-Command",
+				script
+			], { stdio: "ignore" });
+		} catch {}
+	};
+	const away = () => {
+		const last = heartbeats.get("__global__") ?? 0;
+		return Date.now() - last > AWAY_MS;
+	};
+	const maybeNotify = (kind, title, text) => {
+		const now = Date.now();
+		if (now - (lastNotifyAt.get(kind) ?? 0) < NOTIFY_DEDUP_MS) return;
+		lastNotifyAt.set(kind, now);
+		if (away()) notifyWindows(title, text);
+	};
+	const sessionLabel = (session) => {
+		try {
+			const cwd = (session?.header ?? {}).cwd ?? "";
+			return cwd === "" ? "DSH" : cwd.replace(/\\/g, "/").split("/").filter(Boolean).pop() ?? "DSH";
+		} catch {
+			return "DSH";
+		}
+	};
+	if (ctx.webServer) ctx.effect(() => ctx.webServer.register({
+		kind: "exact",
+		path: "/api/session-bridge/heartbeat",
+		handler: async (_req, res) => {
+			heartbeats.set("__global__", Date.now());
+			const body = JSON.stringify({ ok: true });
+			res.writeHead(200, {
+				"Content-Type": "application/json",
+				"Content-Length": Buffer.byteLength(body)
+			});
+			res.end(body);
+		}
+	}), "session-bridge: heartbeat route");
+	ctx.on("session/event", (session, event) => {
+		if (!event || typeof event !== "object") return;
+		const type = event.type;
+		if (type === "turn/start") {
+			const key = session?.id;
+			if (key && pendingCompletes.has(key)) {
+				clearTimeout(pendingCompletes.get(key));
+				pendingCompletes.delete(key);
+			}
+			return;
+		}
+		if (type !== "turn/end") return;
+		const reason = event?.data?.reason?.kind ?? "completed";
+		const label = sessionLabel(session);
+		if (reason === "completed") {
+			const key = session?.id;
+			if (!key) return;
+			const timer = setTimeout(() => {
+				pendingCompletes.delete(key);
+				maybeNotify("completed", "DSH · 任务完成", label + " 的任务已完成。");
+			}, COMPLETE_DELAY_MS);
+			pendingCompletes.set(key, timer);
+		} else if (reason === "error" || reason === "max-tokens" || reason === "interrupted") maybeNotify("failed", "DSH · 任务失败", label + " 的任务出错（" + reason + "）。");
+		else if (reason === "blocked") maybeNotify("blocked", "DSH · 需要处理", label + " 的任务被阻塞，需要你处理。");
+	});
 	ctx.tools.register(defineTool({
 		name: "mailbox_board",
 		description: "Read the most recent messages from the shared public board. The board is a common channel every session can read; send to it with mailbox_send to=board.",

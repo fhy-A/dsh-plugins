@@ -460,6 +460,23 @@ input[type="search"] {
 					if (caretTimer !== null) window.clearTimeout(caretTimer);
 					caretMq.removeEventListener?.("change", onCaretMq);
 				});
+				const beat = () => {
+					if (document.visibilityState !== "visible") return;
+					fetch("/api/session-bridge/heartbeat", {
+						method: "POST",
+						cache: "no-store"
+					}).catch(() => {});
+				};
+				beat();
+				const heartbeatTimer = window.setInterval(beat, 1e4);
+				const onVisibility = () => {
+					if (document.visibilityState === "visible") beat();
+				};
+				document.addEventListener("visibilitychange", onVisibility);
+				ctx.effect(() => () => {
+					window.clearInterval(heartbeatTimer);
+					document.removeEventListener("visibilitychange", onVisibility);
+				});
 			}
 			ctx.slots.inject("conversation.view", () => ctx.slots.register({
 				name: "conversation.view",

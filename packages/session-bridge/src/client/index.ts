@@ -476,6 +476,23 @@ export function apply(ctx: any): void {
       if (caretTimer !== null) window.clearTimeout(caretTimer);
       caretMq.removeEventListener?.("change", onCaretMq);
     });
+    // Presence heartbeat: only while the page is visible. The host uses a
+    // stale heartbeat to decide the user is away, so desktop notifications
+    // fire only for hidden/closed pages.
+    const beat = () => {
+      if (document.visibilityState !== "visible") return;
+      fetch("/api/session-bridge/heartbeat", { method: "POST", cache: "no-store" }).catch(() => {});
+    };
+    beat();
+    const heartbeatTimer = window.setInterval(beat, 10000);
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") beat();
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    ctx.effect(() => () => {
+      window.clearInterval(heartbeatTimer);
+      document.removeEventListener("visibilitychange", onVisibility);
+    });
   }
   ctx.slots.inject("conversation.view", () => ctx.slots.register(
     {
