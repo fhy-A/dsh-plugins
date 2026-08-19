@@ -165,13 +165,12 @@ window.__ModuleLoader__.load({
 .sb-info-refresh:hover{color:var(--dsw-alias-label-primary)}
 .sb-info-error{color:var(--dsw-alias-state-error-primary);font-size:13px;line-height:20px}
 
-/* Input caret enhancement: theme-adaptive contrast color + block caret (progressive). */
+/* Input caret enhancement: theme-adaptive contrast color. */
 textarea,
 input:not([type]),
 input[type="text"],
 input[type="search"] {
   caret-color: var(--sb-caret-color, var(--dsw-alias-label-primary));
-  caret-shape: block;
 }
 .sb-info-hint{color:var(--dsw-alias-label-tertiary);font-size:12px;line-height:18px}
 /* Message width ratios (user preference): user bubbles keep the native 82%
