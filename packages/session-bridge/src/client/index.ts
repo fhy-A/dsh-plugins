@@ -54,6 +54,20 @@ const CSS = `
    specificity above the product's .wSkVaW_root definition; composer card
    width follows via its own calc(var(--dsh-chat-content-width) + 32px). */
 .wSkVaW_root.wSkVaW_root{--dsh-chat-content-width:1200px}
+/* Session info view */
+.sb-info-root{max-width:720px;margin:0 auto;padding:24px 20px;display:flex;flex-direction:column;gap:20px}
+.sb-info-section{display:flex;flex-direction:column;gap:6px}
+.sb-info-label{color:var(--dsw-alias-label-secondary);font-size:12px;font-weight:500;line-height:18px}
+.sb-info-row{display:flex;align-items:center;gap:8px;min-width:0}
+.sb-info-key{color:var(--dsw-alias-label-tertiary);flex:none;width:72px;font-size:13px;line-height:20px}
+.sb-info-value{color:var(--dsw-alias-label-primary);min-width:0;flex:auto;font-size:13px;line-height:20px;overflow-wrap:anywhere}
+.sb-info-code{font-family:var(--ds-font-family-code);font-size:12px;line-height:18px}
+.sb-info-copy{width:28px;height:28px;flex:none;color:var(--dsw-alias-label-tertiary);cursor:pointer;background:0 0;border:none;border-radius:28px;place-items:center;display:inline-flex;padding:6px}
+.sb-info-copy:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-secondary)}
+.sb-info-refresh{align-self:flex-start;color:var(--dsw-alias-label-secondary);cursor:pointer;background:var(--dsw-alias-interactive-bg-hover);border:none;border-radius:8px;padding:6px 12px;font-size:13px;line-height:20px}
+.sb-info-refresh:hover{color:var(--dsw-alias-label-primary)}
+.sb-info-error{color:var(--dsw-alias-state-error-primary);font-size:13px;line-height:20px}
+.sb-info-hint{color:var(--dsw-alias-label-tertiary);font-size:12px;line-height:18px}
 /* Message width ratios (user preference): user bubbles keep the native 82%
    ratio without the fixed 525px cap; mailbox bubbles share it; assistant
    messages are capped at 90% of the chat column. */
@@ -353,4 +367,125 @@ export function apply(ctx: any): void {
     const disposeCollapse = startCollapseEnhancer();
     ctx.effect(() => disposeCollapse);
   }
+  ctx.slots.inject("conversation.view", () => ctx.slots.register(
+    {
+      name: "conversation.view",
+      id: "session-info",
+      order: 20,
+      label: () => "会话信息 · Session Info",
+      inject: (sessionId: string) => ({ sessionId }),
+    },
+    (props: any) => React.createElement(SessionInfoView, props),
+  ));
+}
+
+// ---- Session info view (conversation.view seat) ----
+
+function fmtTime(ts: number | null | undefined): string {
+  if (!ts) return "-";
+  const d = new Date(ts);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate()) + " " + pad(d.getHours()) + ":" + pad(d.getMinutes());
+}
+
+function fmtNum(n: number | undefined | null): string {
+  return n === undefined || n === null ? "-" : Number(n).toLocaleString("en-US");
+}
+
+function InfoRow({ k, v, code }: { k: string; v: React.ReactNode; code?: boolean }): React.ReactElement {
+  return React.createElement("div", { className: "sb-info-row" },
+    React.createElement("span", { className: "sb-info-key" }, k),
+    React.createElement("span", { className: "sb-info-value" + (code ? " sb-info-code" : "") }, v),
+  );
+}
+
+function CopyButton({ text }: { text: string }): React.ReactElement {
+  const [copied, setCopied] = React.useState(false);
+  const timerRef = React.useRef<ReturnType<typeof window.setTimeout> | null>(null);
+  React.useEffect(() => () => {
+    if (timerRef.current !== null) window.clearTimeout(timerRef.current);
+  }, []);
+  const onCopy = () => {
+    if (copied) return;
+    writeClipboard(text).then((ok: boolean) => {
+      if (!ok) return;
+      setCopied(true);
+      timerRef.current = window.setTimeout(() => setCopied(false), 1000);
+    });
+  };
+  return React.createElement("button", {
+    type: "button",
+    className: "sb-info-copy",
+    "aria-label": copied ? "已复制" : "复制",
+    title: copied ? "已复制 · Copied" : "复制 · Copy",
+    onClick: onCopy,
+  }, copied ? React.createElement(IconCheckOutline16, null) : React.createElement(IconCopyOutline16, null));
+}
+
+function SessionInfoView(props: any): React.ReactElement {
+  const sessionId: string = props?.sessionId ?? "";
+  const [info, setInfo] = React.useState<any>(null);
+  const [error, setError] = React.useState<string | null>(null);
+  const refresh = React.useCallback(() => {
+    if (!sessionId) return;
+    fetch("/api/session-bridge/session-info?sessionId=" + encodeURIComponent(sessionId), { cache: "no-store" })
+      .then((r) => r.json())
+      .then((d) => { setInfo(d); setError(d?.ok ? null : (d?.error ?? "unknown")); })
+      .catch((e) => setError(String(e)));
+  }, [sessionId]);
+  React.useEffect(() => {
+    refresh();
+    const timer = window.setInterval(refresh, 3000);
+    return () => window.clearInterval(timer);
+  }, [refresh]);
+  if (!sessionId) {
+    return React.createElement("div", { className: "sb-info-root" },
+      React.createElement("span", { className: "sb-info-hint" }, "未绑定会话 · No session bound"));
+  }
+  if (error && !info) {
+    return React.createElement("div", { className: "sb-info-root" },
+      React.createElement("span", { className: "sb-info-error" }, "加载失败 · " + error));
+  }
+  const s = info?.stats;
+  const ctx = info?.context;
+  const contextText = ctx
+    ? (Number(ctx.messageTokens ?? 0) + Number(ctx.systemTokens ?? 0) + Number(ctx.toolsTokens ?? 0)).toLocaleString("en-US") + " tokens"
+    : "-";
+  return React.createElement("div", { className: "sb-info-root" },
+    React.createElement("button", { type: "button", className: "sb-info-refresh", onClick: refresh }, "刷新 · Refresh"),
+    React.createElement("section", { className: "sb-info-section" },
+      React.createElement("span", { className: "sb-info-label" }, "基本信息"),
+      InfoRow({ k: "名称", v: info?.title ?? "-" }),
+      InfoRow({ k: "项目", v: info?.project || info?.cwd || "-" }),
+      InfoRow({ k: "来源", v: info?.source ?? "DSH" }),
+      InfoRow({ k: "创建", v: fmtTime(info?.createdAt) }),
+      InfoRow({ k: "活跃", v: fmtTime(info?.activeAt) }),
+      InfoRow({ k: "ID", v: info?.id ?? sessionId, code: true }),
+      React.createElement("div", { className: "sb-info-row" },
+        React.createElement("span", { className: "sb-info-key" }, "文件"),
+        React.createElement("span", { className: "sb-info-value sb-info-code" }, info?.file ?? "-"),
+        info?.file ? React.createElement(CopyButton, { text: info.file }) : null,
+      ),
+    ),
+    React.createElement("section", { className: "sb-info-section" },
+      React.createElement("span", { className: "sb-info-label" }, "消息"),
+      InfoRow({ k: "合计", v: fmtNum(s?.messages?.total) }),
+      InfoRow({ k: "用户", v: fmtNum(s?.messages?.user) }),
+      InfoRow({ k: "Agent", v: fmtNum(s?.messages?.agent) }),
+      InfoRow({ k: "工具", v: fmtNum(s?.messages?.tool) }),
+    ),
+    React.createElement("section", { className: "sb-info-section" },
+      React.createElement("span", { className: "sb-info-label" }, "Token"),
+      InfoRow({ k: "合计", v: fmtNum(s?.tokens?.total) }),
+      InfoRow({ k: "总输入", v: fmtNum(s?.tokens?.input) }),
+      InfoRow({ k: "输出", v: fmtNum(s?.tokens?.output) }),
+      InfoRow({ k: "缓存读取", v: fmtNum(s?.tokens?.cacheRead) }),
+    ),
+    React.createElement("section", { className: "sb-info-section" },
+      React.createElement("span", { className: "sb-info-label" }, "上下文"),
+      InfoRow({ k: "当前", v: contextText }),
+    ),
+    React.createElement("span", { className: "sb-info-hint" },
+      info?.live ? "实时 · live" : "会话未加载 · 部分统计不可用"),
+  );
 }

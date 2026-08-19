@@ -21,11 +21,16 @@
  * skips them.
  */
 import { randomUUID } from "node:crypto";
+import * as os from "node:os";
+import * as path from "node:path";
 import { defineTool } from "@deepseek-ai/dsh-tools";
 import {
   BOARD,
+  aggregateSessionStats,
   boardMessages,
   deliveryText,
+  encodeSessionDir,
+  lastSessionTitle,
   markDelivered,
   poll,
   recentMessages,
@@ -37,7 +42,7 @@ import {
 
 export const name = "session-bridge";
 
-export const inject = ["tools", "sessionQuery", "agents"];
+export const inject = ["tools", "sessionQuery", "agents", "sessions", "webServer"];
 
 function render(_args: unknown, value: unknown) {
   return [{ type: "text" as const, text: JSON.stringify(value, null, 2) }];
@@ -245,6 +250,67 @@ export function apply(ctx: any): void {
     },
   }));
 
+  if (ctx.webServer) {
+    ctx.effect(() => ctx.webServer.register({
+      kind: "exact",
+      path: "/api/session-bridge/session-info",
+      handler: async (req: any, res: any) => {
+        let sessionId = "";
+        try {
+          sessionId = new URL(req.url ?? "/", "http://localhost").searchParams.get("sessionId") ?? "";
+        } catch { /* keep empty */ }
+        const home = process.env.DSH_HOME || path.join(os.homedir(), ".dsh");
+        let payload: any = { ok: false, error: "session not found" };
+        if (/^[A-Za-z0-9_-]{8,64}$/.test(sessionId)) {
+          try {
+            const live: any = ctx.sessions?.get?.(sessionId);
+            let header: any = null;
+            let events: any = null;
+            let title: string | null = null;
+            if (live) {
+              header = live.header;
+              events = live.events;
+              title = lastSessionTitle(events);
+            } else {
+              const records: any = await ctx.sessionQuery.listSessions();
+              const rec = (records ?? []).find((r: any) => r?.header?.id === sessionId);
+              if (rec) header = rec.header;
+            }
+            if (header) {
+              const cwd = header.cwd ?? "";
+              const contextView: any = live?.getSnapshot?.()?.views?.get?.("contextBreakdown") ?? null;
+              const lastEvent: any = Array.isArray(events) && events.length > 0 ? events[events.length - 1] : null;
+              payload = {
+                ok: true,
+                id: sessionId,
+                title,
+                project: cwd === "" ? "" : path.basename(cwd),
+                cwd,
+                source: "DSH",
+                live: Boolean(live),
+                createdAt: header.createdAt ?? null,
+                activeAt: lastEvent?.time ?? null,
+                file: path.join(home, "sessions", encodeSessionDir(cwd), sessionId, "session.jsonl.zstd"),
+                stats: events ? aggregateSessionStats(events) : null,
+                context: contextView,
+              };
+            }
+          } catch (e: any) {
+            payload = { ok: false, error: "aggregate failed: " + (e?.message ?? String(e)) };
+          }
+        } else {
+          payload = { ok: false, error: "invalid sessionId" };
+        }
+        const body = JSON.stringify(payload);
+        res.writeHead(200, {
+          "Content-Type": "application/json",
+          "Cache-Control": "no-store",
+          "Content-Length": Buffer.byteLength(body),
+        });
+        res.end(body);
+      },
+    }), "session-bridge: session-info route");
+  }
   ctx.tools.register(defineTool({
     name: "mailbox_board",
     description:

@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { send, poll, boardMessages, unreadCount, readMessages, sanitizeId, deliveryText, markDelivered, recentMessages } from "../lib/store.mjs";
+import { send, poll, boardMessages, unreadCount, readMessages, sanitizeId, deliveryText, markDelivered, recentMessages, encodeSessionDir, aggregateSessionStats, lastSessionTitle } from "../lib/store.mjs";
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "sb-"));
 const root = path.join(tmp, "bridge");
@@ -95,4 +95,36 @@ test("recentMessages pull-reads any mailbox without consuming the cursor", () =>
   assert.equal(recentMessages(root, "board", 10).length, 2, "board readable via recentMessages");
   const p = poll(root, "e");
   assert.equal(p.direct.length, 3, "poll still consumes all after pull reads");
+});
+test("encodeSessionDir encodes cwd segments", () => {
+  assert.equal(encodeSessionDir("C:\\Users\\Admin\\Desktop\\api中转站"), "--C-Users-Admin-Desktop-api~4E2D~8F6C~7AD9--");
+  assert.equal(encodeSessionDir("C:\\Users"), "--C-Users--");
+});
+
+test("aggregateSessionStats counts messages and tokens", () => {
+  const events = [
+    { type: "user/message", data: {} },
+    { type: "assistant/message", data: {} },
+    { type: "tool/call", data: {} },
+    { type: "assistant/chunk", data: { usage: { inputTokens: 100, outputTokens: 20, cacheReadTokens: 50, cacheWriteTokens: 10, reasoningTokens: 5 } } },
+    { type: "assistant/chunk", data: { usage: { inputTokens: 30, outputTokens: 8 } } },
+    { type: "turn/start", data: {} },
+  ];
+  const s = aggregateSessionStats(events);
+  assert.deepEqual(s.messages, { total: 3, user: 1, agent: 1, tool: 1 });
+  assert.equal(s.tokens.input, 130);
+  assert.equal(s.tokens.output, 28);
+  assert.equal(s.tokens.cacheRead, 50);
+  assert.equal(s.tokens.total, 158);
+  assert.equal(s.usageSteps, 2);
+});
+
+test("lastSessionTitle returns the newest title event", () => {
+  const events = [
+    { type: "session/title", data: { title: "first" } },
+    { type: "user/message", data: {} },
+    { type: "session/title", data: { title: "second" } },
+  ];
+  assert.equal(lastSessionTitle(events), "second");
+  assert.equal(lastSessionTitle(null), null);
 });

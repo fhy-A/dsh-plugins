@@ -1,6 +1,6 @@
-import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import * as fs from "node:fs";
 //#region src/store.ts
 /**
 * Mailbox store for dsh-session-bridge.
@@ -183,5 +183,65 @@ function markDelivered(root, sessionId, seq) {
 	if (deliveredSeqs(root, sessionId).has(seq)) return;
 	fs.appendFileSync(file, seq + "\n", "utf8");
 }
+/** Encode a cwd into the DSH sessions directory segment (observed layout). */
+function encodeSessionDir(cwd) {
+	const out = [];
+	for (const ch of String(cwd)) {
+		const code = ch.charCodeAt(0);
+		if (ch === "\\" || ch === ":") {
+			if (out[out.length - 1] !== "-") out.push("-");
+		} else if (code > 127) out.push("~" + code.toString(16).toUpperCase().padStart(4, "0"));
+		else out.push(ch);
+	}
+	return "--" + out.join("") + "--";
+}
+/** Aggregate message counts and token usage from one session event log. */
+function aggregateSessionStats(events) {
+	const stats = {
+		messages: {
+			total: 0,
+			user: 0,
+			agent: 0,
+			tool: 0
+		},
+		tokens: {
+			total: 0,
+			input: 0,
+			output: 0,
+			cacheRead: 0,
+			cacheWrite: 0,
+			reasoning: 0
+		},
+		usageSteps: 0
+	};
+	for (const ev of events ?? []) {
+		const type = ev?.type;
+		if (type === "user/message") stats.messages.user += 1;
+		else if (type === "assistant/message") stats.messages.agent += 1;
+		else if (type === "tool/call") stats.messages.tool += 1;
+		if (type === "assistant/chunk") {
+			const u = ev?.data?.usage;
+			if (u && typeof u === "object") {
+				stats.usageSteps += 1;
+				const input = Number(u.inputTokens) || 0;
+				const output = Number(u.outputTokens) || 0;
+				stats.tokens.input += input;
+				stats.tokens.output += output;
+				stats.tokens.cacheRead += Number(u.cacheReadTokens) || 0;
+				stats.tokens.cacheWrite += Number(u.cacheWriteTokens) || 0;
+				stats.tokens.reasoning += Number(u.reasoningTokens) || 0;
+			}
+		}
+	}
+	stats.messages.total = stats.messages.user + stats.messages.agent + stats.messages.tool;
+	stats.tokens.total = stats.tokens.input + stats.tokens.output;
+	return stats;
+}
+/** Last session/title event text, or null. */
+function lastSessionTitle(events) {
+	let title = null;
+	for (const ev of events ?? []) if (ev?.type === "session/title" && typeof ev?.data?.title === "string" && ev.data.title !== "") title = ev.data.title;
+	return title;
+}
 //#endregion
-export { BOARD, boardMessages, boardPath, cursorPath, deliveredPath, deliveredSeqs, deliveryText, mailboxPath, markDelivered, poll, readCursor, readMessages, recentMessages, rootDir, sanitizeId, send, unreadCount, writeCursor };
+export { BOARD, aggregateSessionStats, boardMessages, boardPath, cursorPath, deliveredPath, deliveredSeqs, deliveryText, encodeSessionDir, lastSessionTitle, mailboxPath, markDelivered, poll, readCursor, readMessages, recentMessages, rootDir, sanitizeId, send, unreadCount, writeCursor };

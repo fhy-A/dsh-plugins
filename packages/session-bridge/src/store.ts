@@ -219,3 +219,82 @@ export function markDelivered(root: string, sessionId: string, seq: number): voi
   if (deliveredSeqs(root, sessionId).has(seq)) return;
   fs.appendFileSync(file, seq + "\n", "utf8");
 }
+// ---- Session info helpers (pure, unit-testable) ----
+
+/** Encode a cwd into the DSH sessions directory segment (observed layout). */
+export function encodeSessionDir(cwd: string): string {
+  const out: string[] = [];
+  for (const ch of String(cwd)) {
+    const code = ch.charCodeAt(0);
+    if (ch === "\\" || ch === ":") {
+      if (out[out.length - 1] !== "-") out.push("-"); // fold consecutive separators
+    } else if (code > 127) out.push("~" + code.toString(16).toUpperCase().padStart(4, "0"));
+    else out.push(ch);
+  }
+  return "--" + out.join("") + "--";
+}
+
+export interface SessionMessageCounts {
+  total: number;
+  user: number;
+  agent: number;
+  tool: number;
+}
+
+export interface SessionTokenTotals {
+  total: number;
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheWrite: number;
+  reasoning: number;
+}
+
+export interface SessionInfoStats {
+  messages: SessionMessageCounts;
+  tokens: SessionTokenTotals;
+  usageSteps: number;
+}
+
+/** Aggregate message counts and token usage from one session event log. */
+export function aggregateSessionStats(events: readonly any[] | null | undefined): SessionInfoStats {
+  const stats: SessionInfoStats = {
+    messages: { total: 0, user: 0, agent: 0, tool: 0 },
+    tokens: { total: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0 },
+    usageSteps: 0,
+  };
+  for (const ev of events ?? []) {
+    const type = ev?.type;
+    if (type === "user/message") stats.messages.user += 1;
+    else if (type === "assistant/message") stats.messages.agent += 1;
+    else if (type === "tool/call") stats.messages.tool += 1;
+    if (type === "assistant/chunk") {
+      const u = ev?.data?.usage;
+      if (u && typeof u === "object") {
+        stats.usageSteps += 1;
+        const input = Number(u.inputTokens) || 0;
+        const output = Number(u.outputTokens) || 0;
+        stats.tokens.input += input;
+        stats.tokens.output += output;
+        stats.tokens.cacheRead += Number(u.cacheReadTokens) || 0;
+        stats.tokens.cacheWrite += Number(u.cacheWriteTokens) || 0;
+        stats.tokens.reasoning += Number(u.reasoningTokens) || 0;
+      }
+    }
+  }
+  stats.messages.total = stats.messages.user + stats.messages.agent + stats.messages.tool;
+  stats.tokens.total = stats.tokens.input + stats.tokens.output;
+  return stats;
+}
+
+/** Last session/title event text, or null. */
+export function lastSessionTitle(events: readonly any[] | null | undefined): string | null {
+  let title: string | null = null;
+  for (const ev of events ?? []) {
+    if (ev?.type === "session/title" && typeof ev?.data?.title === "string" && ev.data.title !== "") {
+      title = ev.data.title;
+    }
+  }
+  return title;
+}
+
