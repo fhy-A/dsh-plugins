@@ -1,5 +1,6 @@
 import { aggregateSessionStats, boardMessages, deliveryText, encodeSessionDir, lastSessionTitle, markDelivered, poll, recentMessages, rootDir, sanitizeId, send, unreadCount } from "./store.mjs";
 import { randomUUID } from "node:crypto";
+import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { defineTool } from "@deepseek-ai/dsh-tools";
@@ -263,8 +264,33 @@ function apply(ctx) {
 				}
 				if (header) {
 					const cwd = header.cwd ?? "";
-					const contextView = live?.getSnapshot?.()?.views?.get?.("contextBreakdown") ?? null;
 					const lastEvent = Array.isArray(events) && events.length > 0 ? events[events.length - 1] : null;
+					let cacheRow = null;
+					try {
+						const raw = fs.readFileSync(path.join(home, "storages", "session_projcache.json"), "utf8");
+						cacheRow = JSON.parse(raw)?.tables?.sessions?.[sessionId] ?? null;
+					} catch {}
+					if (cacheRow?.rows?.title?.val && typeof cacheRow.rows.title.val === "string") title = cacheRow.rows.title.val;
+					const tu = cacheRow?.rows?.tokenUsage?.val;
+					const cp = cacheRow?.rows?.contextPressure?.val;
+					const cb = cacheRow?.rows?.contextBreakdown?.val;
+					const fallbackStats = events ? aggregateSessionStats(events) : null;
+					const stats = {
+						messages: fallbackStats?.messages ?? {
+							total: 0,
+							user: 0,
+							agent: 0,
+							tool: 0
+						},
+						tokens: tu?.totals ? {
+							total: (Number(tu.totals.uncachedInputTokens) || 0) + (Number(tu.totals.outputTokens) || 0),
+							input: Number(tu.totals.uncachedInputTokens) || 0,
+							output: Number(tu.totals.outputTokens) || 0,
+							cacheRead: Number(tu.totals.cacheReadTokens) || 0,
+							cacheWrite: Number(tu.totals.cacheWriteTokens) || 0,
+							reasoning: 0
+						} : fallbackStats?.tokens ?? null
+					};
 					payload = {
 						ok: true,
 						id: sessionId,
@@ -274,10 +300,12 @@ function apply(ctx) {
 						source: "DSH",
 						live: Boolean(live),
 						createdAt: header.createdAt ?? null,
-						activeAt: lastEvent?.time ?? null,
+						activeAt: lastEvent?.time ?? cacheRow?.rows?.sessionListMetadata?.val?.lastPromptAt ?? null,
 						file: path.join(home, "sessions", encodeSessionDir(cwd), sessionId, "session.jsonl.zstd"),
-						stats: events ? aggregateSessionStats(events) : null,
-						context: contextView
+						stats,
+						context: cp ?? cb ?? null,
+						contextWindow: cp?.contextWindow ?? null,
+						surfaceTokens: cp?.surfaceTokens ?? null
 					};
 				}
 			} catch (e) {

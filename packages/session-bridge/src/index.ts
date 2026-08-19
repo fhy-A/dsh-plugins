@@ -21,6 +21,7 @@
  * skips them.
  */
 import { randomUUID } from "node:crypto";
+import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { defineTool } from "@deepseek-ai/dsh-tools";
@@ -278,8 +279,33 @@ export function apply(ctx: any): void {
             }
             if (header) {
               const cwd = header.cwd ?? "";
-              const contextView: any = live?.getSnapshot?.()?.views?.get?.("contextBreakdown") ?? null;
               const lastEvent: any = Array.isArray(events) && events.length > 0 ? events[events.length - 1] : null;
+              // Projection cache (persisted by DSH) is the preferred source for
+              // title / token usage / context pressure; event aggregation is a fallback.
+              let cacheRow: any = null;
+              try {
+                const raw = fs.readFileSync(path.join(home, "storages", "session_projcache.json"), "utf8");
+                const cache: any = JSON.parse(raw);
+                cacheRow = cache?.tables?.sessions?.[sessionId] ?? null;
+              } catch { /* cache unavailable */ }
+              if (cacheRow?.rows?.title?.val && typeof cacheRow.rows.title.val === "string") title = cacheRow.rows.title.val;
+              const tu: any = cacheRow?.rows?.tokenUsage?.val;
+              const cp: any = cacheRow?.rows?.contextPressure?.val;
+              const cb: any = cacheRow?.rows?.contextBreakdown?.val;
+              const fallbackStats = events ? aggregateSessionStats(events) : null;
+              const stats = {
+                messages: fallbackStats?.messages ?? { total: 0, user: 0, agent: 0, tool: 0 },
+                tokens: tu?.totals
+                  ? {
+                      total: (Number(tu.totals.uncachedInputTokens) || 0) + (Number(tu.totals.outputTokens) || 0),
+                      input: Number(tu.totals.uncachedInputTokens) || 0,
+                      output: Number(tu.totals.outputTokens) || 0,
+                      cacheRead: Number(tu.totals.cacheReadTokens) || 0,
+                      cacheWrite: Number(tu.totals.cacheWriteTokens) || 0,
+                      reasoning: 0,
+                    }
+                  : fallbackStats?.tokens ?? null,
+              };
               payload = {
                 ok: true,
                 id: sessionId,
@@ -289,10 +315,12 @@ export function apply(ctx: any): void {
                 source: "DSH",
                 live: Boolean(live),
                 createdAt: header.createdAt ?? null,
-                activeAt: lastEvent?.time ?? null,
+                activeAt: lastEvent?.time ?? cacheRow?.rows?.sessionListMetadata?.val?.lastPromptAt ?? null,
                 file: path.join(home, "sessions", encodeSessionDir(cwd), sessionId, "session.jsonl.zstd"),
-                stats: events ? aggregateSessionStats(events) : null,
-                context: contextView,
+                stats,
+                context: cp ?? cb ?? null,
+                contextWindow: cp?.contextWindow ?? null,
+                surfaceTokens: cp?.surfaceTokens ?? null,
               };
             }
           } catch (e: any) {

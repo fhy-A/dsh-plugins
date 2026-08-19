@@ -44,6 +44,74 @@ window.__ModuleLoader__.load({
 		*/
 		const PLUGIN_ID = "session-bridge";
 		const CSS_TAG = "@dsh-external/dsh-session-bridge/mailbox.css";
+		const NS = "sessionInfo";
+		const zh = {
+			"view.label": "会话信息",
+			"refresh": "刷新",
+			"basic": "基本信息",
+			"name": "名称",
+			"project": "项目",
+			"source": "来源",
+			"created": "创建",
+			"active": "活跃",
+			"id": "ID",
+			"file": "文件",
+			"messages": "消息",
+			"total": "合计",
+			"user": "用户",
+			"agent": "Agent",
+			"tool": "工具",
+			"tokens": "Token",
+			"input": "总输入",
+			"output": "输出",
+			"cacheRead": "缓存读取",
+			"context": "上下文",
+			"current": "当前",
+			"copied": "已复制",
+			"copy": "复制",
+			"noSession": "未绑定会话",
+			"loadFailed": "加载失败",
+			"live": "实时 · live",
+			"notLoaded": "会话未加载 · 部分统计不可用"
+		};
+		const en = {
+			"view.label": "Session Info",
+			"refresh": "Refresh",
+			"basic": "Basic",
+			"name": "Name",
+			"project": "Project",
+			"source": "Source",
+			"created": "Created",
+			"active": "Active",
+			"id": "ID",
+			"file": "File",
+			"messages": "Messages",
+			"total": "Total",
+			"user": "User",
+			"agent": "Agent",
+			"tool": "Tool",
+			"tokens": "Token",
+			"input": "Input",
+			"output": "Output",
+			"cacheRead": "Cache read",
+			"context": "Context",
+			"current": "Current",
+			"copied": "Copied",
+			"copy": "Copy",
+			"noSession": "No session bound",
+			"loadFailed": "Load failed",
+			"live": "Live",
+			"notLoaded": "Session not loaded · partial stats unavailable"
+		};
+		const i18n = {
+			NS,
+			zh,
+			en
+		};
+		/** Localized lookup; falls back to zh when the current locale is not en. */
+		function localeText(dict, key) {
+			return (((typeof document !== "undefined" ? document.documentElement.lang : "") || "").toLowerCase().startsWith("en") ? en : zh)[key] ?? dict[key] ?? key;
+		}
 		const CSS = `
 .sb-mailbox-row{display:flex;flex-direction:column;align-items:flex-end;gap:6px}
 .sb-mailbox-stack{display:flex;flex-direction:column;align-items:flex-end;gap:8px;min-width:0;max-width:min(525px,82%)}
@@ -325,7 +393,7 @@ window.__ModuleLoader__.load({
 			});
 		}
 		/** Hard dependency on the client slots service (guarded bundle context). */
-		const inject = ["slots"];
+		const inject = ["slots", "locale"];
 		function apply(ctx) {
 			if (typeof document !== "undefined") {
 				if (document.querySelector("style[data-plugin-css=" + JSON.stringify(CSS_TAG) + "]") === null) {
@@ -339,6 +407,10 @@ window.__ModuleLoader__.load({
 					});
 				}
 			}
+			ctx.locale?.register?.(NS, {
+				zh,
+				en
+			});
 			ctx.slots.inject("conversation.chat.node", () => ctx.slots.register({
 				name: "conversation.chat.node",
 				key: "context",
@@ -352,7 +424,8 @@ window.__ModuleLoader__.load({
 				name: "conversation.view",
 				id: "session-info",
 				order: 20,
-				label: () => "会话信息 · Session Info",
+				locale: NS,
+				label: () => localeText(zh, "view.label"),
 				inject: (sessionId) => ({ sessionId })
 			}, (props) => react.default.createElement(SessionInfoView, props)));
 		}
@@ -368,7 +441,7 @@ window.__ModuleLoader__.load({
 		function InfoRow({ k, v, code }) {
 			return react.default.createElement("div", { className: "sb-info-row" }, react.default.createElement("span", { className: "sb-info-key" }, k), react.default.createElement("span", { className: "sb-info-value" + (code ? " sb-info-code" : "") }, v));
 		}
-		function CopyButton({ text }) {
+		function CopyButton({ text, t }) {
 			const [copied, setCopied] = react.default.useState(false);
 			const timerRef = react.default.useRef(null);
 			react.default.useEffect(() => () => {
@@ -385,13 +458,14 @@ window.__ModuleLoader__.load({
 			return react.default.createElement("button", {
 				type: "button",
 				className: "sb-info-copy",
-				"aria-label": copied ? "已复制" : "复制",
-				title: copied ? "已复制 · Copied" : "复制 · Copy",
+				"aria-label": copied ? t("copied") : t("copy"),
+				title: copied ? t("copied") : t("copy"),
 				onClick: onCopy
 			}, copied ? react.default.createElement(_deepseek_ai_dsh_client_ui_primitives.IconCheckOutline16, null) : react.default.createElement(_deepseek_ai_dsh_client_ui_primitives.IconCopyOutline16, null));
 		}
 		function SessionInfoView(props) {
 			const sessionId = props?.sessionId ?? "";
+			const t = typeof props?.t === "function" ? props.t : (k) => localeText(zh, k);
 			const [info, setInfo] = react.default.useState(null);
 			const [error, setError] = react.default.useState(null);
 			const refresh = react.default.useCallback(() => {
@@ -406,65 +480,70 @@ window.__ModuleLoader__.load({
 				const timer = window.setInterval(refresh, 3e3);
 				return () => window.clearInterval(timer);
 			}, [refresh]);
-			if (!sessionId) return react.default.createElement("div", { className: "sb-info-root" }, react.default.createElement("span", { className: "sb-info-hint" }, "未绑定会话 · No session bound"));
-			if (error && !info) return react.default.createElement("div", { className: "sb-info-root" }, react.default.createElement("span", { className: "sb-info-error" }, "加载失败 · " + error));
+			if (!sessionId) return react.default.createElement("div", { className: "sb-info-root" }, react.default.createElement("span", { className: "sb-info-hint" }, t("noSession")));
+			if (error && !info) return react.default.createElement("div", { className: "sb-info-root" }, react.default.createElement("span", { className: "sb-info-error" }, t("loadFailed") + " · " + error));
 			const s = info?.stats;
-			const ctx = info?.context;
-			const contextText = ctx ? (Number(ctx.messageTokens ?? 0) + Number(ctx.systemTokens ?? 0) + Number(ctx.toolsTokens ?? 0)).toLocaleString("en-US") + " tokens" : "-";
+			const contextWindow = Number(info?.contextWindow) || 0;
+			const surfaceTokens = Number(info?.surfaceTokens) || 0;
+			const contextText = contextWindow > 0 ? Math.round(surfaceTokens / contextWindow * 1e3) / 10 + "%（" + surfaceTokens.toLocaleString("en-US") + " / " + contextWindow.toLocaleString("en-US") + "）" : info?.context ? (Number(info.context.messageTokens ?? 0) + Number(info.context.systemTokens ?? 0) + Number(info.context.toolsTokens ?? 0)).toLocaleString("en-US") + " tokens" : "-";
 			return react.default.createElement("div", { className: "sb-info-root" }, react.default.createElement("button", {
 				type: "button",
 				className: "sb-info-refresh",
 				onClick: refresh
-			}, "刷新 · Refresh"), react.default.createElement("section", { className: "sb-info-section" }, react.default.createElement("span", { className: "sb-info-label" }, "基本信息"), InfoRow({
-				k: "名称",
+			}, t("refresh")), react.default.createElement("section", { className: "sb-info-section" }, react.default.createElement("span", { className: "sb-info-label" }, t("basic")), InfoRow({
+				k: t("name"),
 				v: info?.title ?? "-"
 			}), InfoRow({
-				k: "项目",
+				k: t("project"),
 				v: info?.project || info?.cwd || "-"
 			}), InfoRow({
-				k: "来源",
+				k: t("source"),
 				v: info?.source ?? "DSH"
 			}), InfoRow({
-				k: "创建",
+				k: t("created"),
 				v: fmtTime(info?.createdAt)
 			}), InfoRow({
-				k: "活跃",
+				k: t("active"),
 				v: fmtTime(info?.activeAt)
 			}), InfoRow({
-				k: "ID",
+				k: t("id"),
 				v: info?.id ?? sessionId,
 				code: true
-			}), react.default.createElement("div", { className: "sb-info-row" }, react.default.createElement("span", { className: "sb-info-key" }, "文件"), react.default.createElement("span", { className: "sb-info-value sb-info-code" }, info?.file ?? "-"), info?.file ? react.default.createElement(CopyButton, { text: info.file }) : null)), react.default.createElement("section", { className: "sb-info-section" }, react.default.createElement("span", { className: "sb-info-label" }, "消息"), InfoRow({
-				k: "合计",
+			}), react.default.createElement("div", { className: "sb-info-row" }, react.default.createElement("span", { className: "sb-info-key" }, t("file")), react.default.createElement("span", { className: "sb-info-value sb-info-code" }, info?.file ?? "-"), info?.file ? react.default.createElement(CopyButton, {
+				text: info.file,
+				t
+			}) : null)), react.default.createElement("section", { className: "sb-info-section" }, react.default.createElement("span", { className: "sb-info-label" }, t("messages")), InfoRow({
+				k: t("total"),
 				v: fmtNum(s?.messages?.total)
 			}), InfoRow({
-				k: "用户",
+				k: t("user"),
 				v: fmtNum(s?.messages?.user)
 			}), InfoRow({
-				k: "Agent",
+				k: t("agent"),
 				v: fmtNum(s?.messages?.agent)
 			}), InfoRow({
-				k: "工具",
+				k: t("tool"),
 				v: fmtNum(s?.messages?.tool)
-			})), react.default.createElement("section", { className: "sb-info-section" }, react.default.createElement("span", { className: "sb-info-label" }, "Token"), InfoRow({
-				k: "合计",
+			})), react.default.createElement("section", { className: "sb-info-section" }, react.default.createElement("span", { className: "sb-info-label" }, t("tokens")), InfoRow({
+				k: t("total"),
 				v: fmtNum(s?.tokens?.total)
 			}), InfoRow({
-				k: "总输入",
+				k: t("input"),
 				v: fmtNum(s?.tokens?.input)
 			}), InfoRow({
-				k: "输出",
+				k: t("output"),
 				v: fmtNum(s?.tokens?.output)
 			}), InfoRow({
-				k: "缓存读取",
+				k: t("cacheRead"),
 				v: fmtNum(s?.tokens?.cacheRead)
-			})), react.default.createElement("section", { className: "sb-info-section" }, react.default.createElement("span", { className: "sb-info-label" }, "上下文"), InfoRow({
-				k: "当前",
+			})), react.default.createElement("section", { className: "sb-info-section" }, react.default.createElement("span", { className: "sb-info-label" }, t("context")), InfoRow({
+				k: t("current"),
 				v: contextText
-			})), react.default.createElement("span", { className: "sb-info-hint" }, info?.live ? "实时 · live" : "会话未加载 · 部分统计不可用"));
+			})), react.default.createElement("span", { className: "sb-info-hint" }, info?.live ? t("live") : t("notLoaded")));
 		}
 		//#endregion
 		exports.apply = apply;
+		exports.i18n = i18n;
 		exports.inject = inject;
 		return module.exports;
 	}

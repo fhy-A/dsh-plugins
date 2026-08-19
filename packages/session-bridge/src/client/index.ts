@@ -25,6 +25,74 @@ import {
 const PLUGIN_ID = "session-bridge";
 const CSS_TAG = "@dsh-external/dsh-session-bridge/mailbox.css";
 
+// ---- i18n ----
+const NS = "sessionInfo";
+const zh = {
+  "view.label": "会话信息",
+  "refresh": "刷新",
+  "basic": "基本信息",
+  "name": "名称",
+  "project": "项目",
+  "source": "来源",
+  "created": "创建",
+  "active": "活跃",
+  "id": "ID",
+  "file": "文件",
+  "messages": "消息",
+  "total": "合计",
+  "user": "用户",
+  "agent": "Agent",
+  "tool": "工具",
+  "tokens": "Token",
+  "input": "总输入",
+  "output": "输出",
+  "cacheRead": "缓存读取",
+  "context": "上下文",
+  "current": "当前",
+  "copied": "已复制",
+  "copy": "复制",
+  "noSession": "未绑定会话",
+  "loadFailed": "加载失败",
+  "live": "实时 · live",
+  "notLoaded": "会话未加载 · 部分统计不可用",
+};
+const en: Record<string, string> = {
+  "view.label": "Session Info",
+  "refresh": "Refresh",
+  "basic": "Basic",
+  "name": "Name",
+  "project": "Project",
+  "source": "Source",
+  "created": "Created",
+  "active": "Active",
+  "id": "ID",
+  "file": "File",
+  "messages": "Messages",
+  "total": "Total",
+  "user": "User",
+  "agent": "Agent",
+  "tool": "Tool",
+  "tokens": "Token",
+  "input": "Input",
+  "output": "Output",
+  "cacheRead": "Cache read",
+  "context": "Context",
+  "current": "Current",
+  "copied": "Copied",
+  "copy": "Copy",
+  "noSession": "No session bound",
+  "loadFailed": "Load failed",
+  "live": "Live",
+  "notLoaded": "Session not loaded · partial stats unavailable",
+};
+export const i18n = { NS, zh, en };
+/** Localized lookup; falls back to zh when the current locale is not en. */
+function localeText(dict: Record<string, string>, key: string): string {
+  const lang = (typeof document !== "undefined" ? document.documentElement.lang : "") || "";
+  const table = lang.toLowerCase().startsWith("en") ? en : zh;
+  return table[key] ?? dict[key] ?? key;
+}
+
 const CSS = `
 .sb-mailbox-row{display:flex;flex-direction:column;align-items:flex-end;gap:6px}
 .sb-mailbox-stack{display:flex;flex-direction:column;align-items:flex-end;gap:8px;min-width:0;max-width:min(525px,82%)}
@@ -343,7 +411,7 @@ function MailboxContextNodeView(props: any): React.ReactElement | null {
 }
 
 /** Hard dependency on the client slots service (guarded bundle context). */
-export const inject = ["slots"];
+export const inject = ["slots", "locale"];
 
 export function apply(ctx: any): void {
   if (typeof document !== "undefined") {
@@ -359,6 +427,7 @@ export function apply(ctx: any): void {
       });
     }
   }
+  ctx.locale?.register?.(NS, { zh, en });
   ctx.slots.inject("conversation.chat.node", () => ctx.slots.register(
     { name: "conversation.chat.node", key: "context", priority: -100 },
     (props: any) => React.createElement(MailboxContextNodeView, props),
@@ -372,7 +441,8 @@ export function apply(ctx: any): void {
       name: "conversation.view",
       id: "session-info",
       order: 20,
-      label: () => "会话信息 · Session Info",
+      locale: NS,
+      label: () => localeText(zh, "view.label"),
       inject: (sessionId: string) => ({ sessionId }),
     },
     (props: any) => React.createElement(SessionInfoView, props),
@@ -399,7 +469,7 @@ function InfoRow({ k, v, code }: { k: string; v: React.ReactNode; code?: boolean
   );
 }
 
-function CopyButton({ text }: { text: string }): React.ReactElement {
+function CopyButton({ text, t }: { text: string; t: (k: string) => string }): React.ReactElement {
   const [copied, setCopied] = React.useState(false);
   const timerRef = React.useRef<ReturnType<typeof window.setTimeout> | null>(null);
   React.useEffect(() => () => {
@@ -416,14 +486,15 @@ function CopyButton({ text }: { text: string }): React.ReactElement {
   return React.createElement("button", {
     type: "button",
     className: "sb-info-copy",
-    "aria-label": copied ? "已复制" : "复制",
-    title: copied ? "已复制 · Copied" : "复制 · Copy",
+    "aria-label": copied ? t("copied") : t("copy"),
+    title: copied ? t("copied") : t("copy"),
     onClick: onCopy,
   }, copied ? React.createElement(IconCheckOutline16, null) : React.createElement(IconCopyOutline16, null));
 }
 
 function SessionInfoView(props: any): React.ReactElement {
   const sessionId: string = props?.sessionId ?? "";
+  const t = (typeof props?.t === "function" ? props.t : (k: string) => localeText(zh, k));
   const [info, setInfo] = React.useState<any>(null);
   const [error, setError] = React.useState<string | null>(null);
   const refresh = React.useCallback(() => {
@@ -440,52 +511,55 @@ function SessionInfoView(props: any): React.ReactElement {
   }, [refresh]);
   if (!sessionId) {
     return React.createElement("div", { className: "sb-info-root" },
-      React.createElement("span", { className: "sb-info-hint" }, "未绑定会话 · No session bound"));
+      React.createElement("span", { className: "sb-info-hint" }, t("noSession")));
   }
   if (error && !info) {
     return React.createElement("div", { className: "sb-info-root" },
-      React.createElement("span", { className: "sb-info-error" }, "加载失败 · " + error));
+      React.createElement("span", { className: "sb-info-error" }, t("loadFailed") + " · " + error));
   }
   const s = info?.stats;
-  const ctx = info?.context;
-  const contextText = ctx
-    ? (Number(ctx.messageTokens ?? 0) + Number(ctx.systemTokens ?? 0) + Number(ctx.toolsTokens ?? 0)).toLocaleString("en-US") + " tokens"
-    : "-";
+  const contextWindow = Number(info?.contextWindow) || 0;
+  const surfaceTokens = Number(info?.surfaceTokens) || 0;
+  const contextText = contextWindow > 0
+    ? Math.round((surfaceTokens / contextWindow) * 1000) / 10 + "%（" + surfaceTokens.toLocaleString("en-US") + " / " + contextWindow.toLocaleString("en-US") + "）"
+    : (info?.context
+      ? (Number(info.context.messageTokens ?? 0) + Number(info.context.systemTokens ?? 0) + Number(info.context.toolsTokens ?? 0)).toLocaleString("en-US") + " tokens"
+      : "-");
   return React.createElement("div", { className: "sb-info-root" },
-    React.createElement("button", { type: "button", className: "sb-info-refresh", onClick: refresh }, "刷新 · Refresh"),
+    React.createElement("button", { type: "button", className: "sb-info-refresh", onClick: refresh }, t("refresh")),
     React.createElement("section", { className: "sb-info-section" },
-      React.createElement("span", { className: "sb-info-label" }, "基本信息"),
-      InfoRow({ k: "名称", v: info?.title ?? "-" }),
-      InfoRow({ k: "项目", v: info?.project || info?.cwd || "-" }),
-      InfoRow({ k: "来源", v: info?.source ?? "DSH" }),
-      InfoRow({ k: "创建", v: fmtTime(info?.createdAt) }),
-      InfoRow({ k: "活跃", v: fmtTime(info?.activeAt) }),
-      InfoRow({ k: "ID", v: info?.id ?? sessionId, code: true }),
+      React.createElement("span", { className: "sb-info-label" }, t("basic")),
+      InfoRow({ k: t("name"), v: info?.title ?? "-" }),
+      InfoRow({ k: t("project"), v: info?.project || info?.cwd || "-" }),
+      InfoRow({ k: t("source"), v: info?.source ?? "DSH" }),
+      InfoRow({ k: t("created"), v: fmtTime(info?.createdAt) }),
+      InfoRow({ k: t("active"), v: fmtTime(info?.activeAt) }),
+      InfoRow({ k: t("id"), v: info?.id ?? sessionId, code: true }),
       React.createElement("div", { className: "sb-info-row" },
-        React.createElement("span", { className: "sb-info-key" }, "文件"),
+        React.createElement("span", { className: "sb-info-key" }, t("file")),
         React.createElement("span", { className: "sb-info-value sb-info-code" }, info?.file ?? "-"),
-        info?.file ? React.createElement(CopyButton, { text: info.file }) : null,
+        info?.file ? React.createElement(CopyButton, { text: info.file, t }) : null,
       ),
     ),
     React.createElement("section", { className: "sb-info-section" },
-      React.createElement("span", { className: "sb-info-label" }, "消息"),
-      InfoRow({ k: "合计", v: fmtNum(s?.messages?.total) }),
-      InfoRow({ k: "用户", v: fmtNum(s?.messages?.user) }),
-      InfoRow({ k: "Agent", v: fmtNum(s?.messages?.agent) }),
-      InfoRow({ k: "工具", v: fmtNum(s?.messages?.tool) }),
+      React.createElement("span", { className: "sb-info-label" }, t("messages")),
+      InfoRow({ k: t("total"), v: fmtNum(s?.messages?.total) }),
+      InfoRow({ k: t("user"), v: fmtNum(s?.messages?.user) }),
+      InfoRow({ k: t("agent"), v: fmtNum(s?.messages?.agent) }),
+      InfoRow({ k: t("tool"), v: fmtNum(s?.messages?.tool) }),
     ),
     React.createElement("section", { className: "sb-info-section" },
-      React.createElement("span", { className: "sb-info-label" }, "Token"),
-      InfoRow({ k: "合计", v: fmtNum(s?.tokens?.total) }),
-      InfoRow({ k: "总输入", v: fmtNum(s?.tokens?.input) }),
-      InfoRow({ k: "输出", v: fmtNum(s?.tokens?.output) }),
-      InfoRow({ k: "缓存读取", v: fmtNum(s?.tokens?.cacheRead) }),
+      React.createElement("span", { className: "sb-info-label" }, t("tokens")),
+      InfoRow({ k: t("total"), v: fmtNum(s?.tokens?.total) }),
+      InfoRow({ k: t("input"), v: fmtNum(s?.tokens?.input) }),
+      InfoRow({ k: t("output"), v: fmtNum(s?.tokens?.output) }),
+      InfoRow({ k: t("cacheRead"), v: fmtNum(s?.tokens?.cacheRead) }),
     ),
     React.createElement("section", { className: "sb-info-section" },
-      React.createElement("span", { className: "sb-info-label" }, "上下文"),
-      InfoRow({ k: "当前", v: contextText }),
+      React.createElement("span", { className: "sb-info-label" }, t("context")),
+      InfoRow({ k: t("current"), v: contextText }),
     ),
     React.createElement("span", { className: "sb-info-hint" },
-      info?.live ? "实时 · live" : "会话未加载 · 部分统计不可用"),
+      info?.live ? t("live") : t("notLoaded")),
   );
 }
