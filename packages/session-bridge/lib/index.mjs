@@ -333,19 +333,23 @@ function apply(ctx) {
 	const NOTIFY_DEDUP_MS = 3e4;
 	const AWAY_MS = 3e4;
 	const COMPLETE_DELAY_MS = 6e3;
+	const AUMID = "dsh-session-bridge";
 	const notifyWindows = (title, text) => {
 		try {
 			const script = [
-				"Add-Type -AssemblyName System.Windows.Forms",
-				"Add-Type -AssemblyName System.Drawing",
-				"$n = New-Object System.Windows.Forms.NotifyIcon",
-				"$n.Icon = [System.Drawing.SystemIcons]::Information",
-				"$n.Visible = $true",
-				"$n.BalloonTipTitle = " + JSON.stringify(title),
-				"$n.BalloonTipText = " + JSON.stringify(text),
-				"$n.ShowBalloonTip(8000)",
-				"Start-Sleep -Seconds 10",
-				"$n.Dispose()"
+				"Add-Type -AssemblyName System.Runtime.WindowsRuntime",
+				"$null = [Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime]",
+				"$null = [Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom.XmlDocument, ContentType = WindowsRuntime]",
+				"$tmpl = [Windows.UI.Notifications.ToastNotificationManager]::GetTemplateContent([Windows.UI.Notifications.ToastTemplateType]::ToastText02)",
+				"$toastNode = $tmpl.SelectSingleNode('/toast')",
+				"$a1 = $tmpl.CreateAttribute('activationType'); $a1.Value = 'protocol'; $toastNode.Attributes.SetNamedItem($a1) | Out-Null",
+				"$a2 = $tmpl.CreateAttribute('launch'); $a2.Value = 'http://127.0.0.1:3080'; $toastNode.Attributes.SetNamedItem($a2) | Out-Null",
+				"$texts = $tmpl.GetElementsByTagName('text')",
+				"$texts.Item(0).AppendChild($tmpl.CreateTextNode(" + JSON.stringify(title) + ")) | Out-Null",
+				"$texts.Item(1).AppendChild($tmpl.CreateTextNode(" + JSON.stringify(text) + ")) | Out-Null",
+				"$toast = [Windows.UI.Notifications.ToastNotification]::new($tmpl)",
+				"$notifier = [Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier(" + JSON.stringify(AUMID) + ")",
+				"$notifier.Show($toast)"
 			].join("; ");
 			spawn("powershell", [
 				"-NoProfile",
@@ -371,6 +375,33 @@ function apply(ctx) {
 		} catch {
 			return "DSH";
 		}
+	};
+	const sessionTitleOf = (session) => {
+		try {
+			const home = process.env.DSH_HOME || path.join(os.homedir(), ".dsh");
+			const raw = fs.readFileSync(path.join(home, "storages", "session_projcache.json"), "utf8");
+			const title = JSON.parse(raw)?.tables?.sessions?.[session?.id]?.rows?.title?.val;
+			if (typeof title === "string" && title !== "") return title;
+		} catch {}
+		try {
+			const t = lastSessionTitle(session?.events);
+			if (t) return t;
+		} catch {}
+		return sessionLabel(session);
+	};
+	const replyPreviewOf = (session) => {
+		try {
+			const events = session?.events ?? [];
+			for (let i = events.length - 1; i >= 0; i -= 1) {
+				const ev = events[i];
+				if (ev?.type !== "assistant/message") continue;
+				const content = ev?.data?.content;
+				if (!Array.isArray(content)) continue;
+				const text = content.filter((b) => b && typeof b === "object" && b.type === "text" && typeof b.text === "string").map((b) => b.text).join(" ").trim();
+				if (text !== "") return text.length > 120 ? text.slice(0, 120) + "…" : text;
+			}
+		} catch {}
+		return "";
 	};
 	if (ctx.webServer) ctx.effect(() => ctx.webServer.register({
 		kind: "exact",
@@ -404,11 +435,19 @@ function apply(ctx) {
 			if (!key) return;
 			const timer = setTimeout(() => {
 				pendingCompletes.delete(key);
-				maybeNotify("completed", "DSH · 任务完成", label + " 的任务已完成。");
+				const title = sessionTitleOf(session);
+				const preview = replyPreviewOf(session);
+				maybeNotify("completed", "DSH · 任务完成 · " + title, preview === "" ? label + " 的任务已完成。" : preview);
 			}, COMPLETE_DELAY_MS);
 			pendingCompletes.set(key, timer);
-		} else if (reason === "error" || reason === "max-tokens" || reason === "interrupted") maybeNotify("failed", "DSH · 任务失败", label + " 的任务出错（" + reason + "）。");
-		else if (reason === "blocked") maybeNotify("blocked", "DSH · 需要处理", label + " 的任务被阻塞，需要你处理。");
+		} else if (reason === "error" || reason === "max-tokens" || reason === "interrupted") {
+			const title = sessionTitleOf(session);
+			const preview = replyPreviewOf(session);
+			maybeNotify("failed", "DSH · 任务失败 · " + title, preview === "" ? label + " 的任务出错（" + reason + "）。" : preview);
+		} else if (reason === "blocked") {
+			const title = sessionTitleOf(session);
+			maybeNotify("blocked", "DSH · 需要处理 · " + title, label + " 的任务被阻塞，需要你处理。");
+		}
 	});
 	ctx.tools.register(defineTool({
 		name: "mailbox_board",
