@@ -1,0 +1,5 @@
+# session-bridge bundle patch: registers the cross-session mailbox plugin.
+# Install with: dsh plugin --profile <name> add <path-to-this-package>
+- insert:
+    - id: session-bridge
+      name: '@dsh-external/dsh-session-bridge'
