@@ -39,7 +39,7 @@ pnpm test                    # node --test 跑 store 单元测试
 
 ## 开发日志
 
-完成事实与验证记录见 [`docs/development-log/`](docs/development-log/README.md)（DSH 生态开发日志，2026-08-19 起）。
+完成事实与验证记录见仓库顶层 [`docs/development-log/`](../../docs/development-log/README.md)（DSH 生态开发日志，2026-08-19 起）。
 
 ## 许可
 
