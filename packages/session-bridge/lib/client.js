@@ -164,6 +164,15 @@ window.__ModuleLoader__.load({
 .sb-info-refresh{align-self:flex-start;color:var(--dsw-alias-label-secondary);cursor:pointer;background:var(--dsw-alias-interactive-bg-hover);border:none;border-radius:8px;padding:6px 12px;font-size:13px;line-height:20px}
 .sb-info-refresh:hover{color:var(--dsw-alias-label-primary)}
 .sb-info-error{color:var(--dsw-alias-state-error-primary);font-size:13px;line-height:20px}
+
+/* Input caret enhancement: theme-adaptive contrast color + block caret (progressive). */
+textarea,
+input:not([type]),
+input[type="text"],
+input[type="search"] {
+  caret-color: var(--sb-caret-color, var(--dsw-alias-label-primary));
+  caret-shape: block;
+}
 .sb-info-hint{color:var(--dsw-alias-label-tertiary);font-size:12px;line-height:18px}
 /* Message width ratios (user preference): user bubbles keep the native 82%
    ratio without the fixed 525px cap; mailbox bubbles share it; assistant
@@ -429,6 +438,29 @@ window.__ModuleLoader__.load({
 			if (typeof document !== "undefined") {
 				const disposeCollapse = startCollapseEnhancer();
 				ctx.effect(() => disposeCollapse);
+				const applyCaretTheme = () => {
+					const root = document.documentElement;
+					const scheme = root.style.colorScheme || (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+					root.style.setProperty("--sb-caret-color", scheme === "dark" ? "#a5b4fc" : "#3b5bdb");
+				};
+				applyCaretTheme();
+				let caretTimer = null;
+				const caretObserver = new MutationObserver(() => {
+					if (caretTimer !== null) window.clearTimeout(caretTimer);
+					caretTimer = window.setTimeout(applyCaretTheme, 60);
+				});
+				caretObserver.observe(document.documentElement, {
+					attributes: true,
+					attributeFilter: ["style"]
+				});
+				const caretMq = window.matchMedia("(prefers-color-scheme: dark)");
+				const onCaretMq = () => applyCaretTheme();
+				caretMq.addEventListener?.("change", onCaretMq);
+				ctx.effect(() => () => {
+					caretObserver.disconnect();
+					if (caretTimer !== null) window.clearTimeout(caretTimer);
+					caretMq.removeEventListener?.("change", onCaretMq);
+				});
 			}
 			ctx.slots.inject("conversation.view", () => ctx.slots.register({
 				name: "conversation.view",
