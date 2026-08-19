@@ -459,7 +459,7 @@ export function apply(ctx: any): void {
       const root = document.documentElement;
       const scheme = root.style.colorScheme
         || (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
-      root.style.setProperty("--sb-caret-color", scheme === "dark" ? "#a5b4fc" : "#3b5bdb");
+      root.style.setProperty("--sb-caret-color", scheme === "dark" ? "#dbe4ff" : "#3b5bdb");
     };
     applyCaretTheme();
     let caretTimer: number | null = null;
