@@ -460,24 +460,12 @@ input[type="search"] {
 					if (caretTimer !== null) window.clearTimeout(caretTimer);
 					caretMq.removeEventListener?.("change", onCaretMq);
 				});
-				const beat = () => {
-					if (document.visibilityState !== "visible") return;
-					fetch("/api/session-bridge/heartbeat", {
-						method: "POST",
-						cache: "no-store"
-					}).catch(() => {});
-				};
-				beat();
-				const heartbeatTimer = window.setInterval(beat, 1e4);
-				const onVisibility = () => {
-					if (document.visibilityState === "visible") beat();
-				};
-				document.addEventListener("visibilitychange", onVisibility);
-				ctx.effect(() => () => {
-					window.clearInterval(heartbeatTimer);
-					document.removeEventListener("visibilitychange", onVisibility);
-				});
 			}
+			ctx.slots.inject("conversation.session.header.utilities", () => ctx.slots.register({
+				name: "conversation.session.header.utilities",
+				id: "session-bridge-presence",
+				inject: () => ({})
+			}, (props) => react.default.createElement(SessionPresenceProbe, props)));
 			ctx.slots.inject("conversation.view", () => ctx.slots.register({
 				name: "conversation.view",
 				id: "session-info",
@@ -520,6 +508,32 @@ input[type="search"] {
 				title: copied ? t("copied") : t("copy"),
 				onClick: onCopy
 			}, copied ? react.default.createElement(_deepseek_ai_dsh_client_ui_primitives.IconCheckOutline16, null) : react.default.createElement(_deepseek_ai_dsh_client_ui_primitives.IconCopyOutline16, null));
+		}
+		function SessionPresenceProbe(props) {
+			const sessionId = props?.sessionId ?? "";
+			react.default.useEffect(() => {
+				if (!sessionId) return void 0;
+				const beat = () => {
+					if (document.visibilityState !== "visible") return;
+					fetch("/api/session-bridge/heartbeat", {
+						method: "POST",
+						headers: { "Content-Type": "application/json" },
+						body: JSON.stringify({ sessionId }),
+						cache: "no-store"
+					}).catch(() => {});
+				};
+				beat();
+				const timer = window.setInterval(beat, 1e4);
+				const onVisibility = () => {
+					if (document.visibilityState === "visible") beat();
+				};
+				document.addEventListener("visibilitychange", onVisibility);
+				return () => {
+					window.clearInterval(timer);
+					document.removeEventListener("visibilitychange", onVisibility);
+				};
+			}, [sessionId]);
+			return null;
 		}
 		function SessionInfoView(props) {
 			const sessionId = props?.sessionId ?? "";

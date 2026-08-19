@@ -476,24 +476,19 @@ export function apply(ctx: any): void {
       if (caretTimer !== null) window.clearTimeout(caretTimer);
       caretMq.removeEventListener?.("change", onCaretMq);
     });
-    // Presence heartbeat: only while the page is visible. The host uses a
-    // stale heartbeat to decide the user is away, so desktop notifications
-    // fire only for hidden/closed pages.
-    const beat = () => {
-      if (document.visibilityState !== "visible") return;
-      fetch("/api/session-bridge/heartbeat", { method: "POST", cache: "no-store" }).catch(() => {});
-    };
-    beat();
-    const heartbeatTimer = window.setInterval(beat, 10000);
-    const onVisibility = () => {
-      if (document.visibilityState === "visible") beat();
-    };
-    document.addEventListener("visibilitychange", onVisibility);
-    ctx.effect(() => () => {
-      window.clearInterval(heartbeatTimer);
-      document.removeEventListener("visibilitychange", onVisibility);
-    });
   }
+  // Presence probe: reports the currently viewed session to the host so
+  // desktop notifications also fire when the user is on the page but looking
+  // at a different session. Heartbeats only run while the page is visible;
+  // hiding/closing the page stops them (host treats a stale heartbeat as away).
+  ctx.slots.inject("conversation.session.header.utilities", () => ctx.slots.register(
+    {
+      name: "conversation.session.header.utilities",
+      id: "session-bridge-presence",
+      inject: () => ({}),
+    },
+    (props: any) => React.createElement(SessionPresenceProbe, props),
+  ));
   ctx.slots.inject("conversation.view", () => ctx.slots.register(
     {
       name: "conversation.view",
@@ -548,6 +543,34 @@ function CopyButton({ text, t }: { text: string; t: (k: string) => string }): Re
     title: copied ? t("copied") : t("copy"),
     onClick: onCopy,
   }, copied ? React.createElement(IconCheckOutline16, null) : React.createElement(IconCopyOutline16, null));
+}
+
+// ---- Presence probe (invisible) ----
+function SessionPresenceProbe(props: any): React.ReactElement | null {
+  const sessionId: string = props?.sessionId ?? "";
+  React.useEffect(() => {
+    if (!sessionId) return undefined;
+    const beat = () => {
+      if (document.visibilityState !== "visible") return;
+      fetch("/api/session-bridge/heartbeat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sessionId }),
+        cache: "no-store",
+      }).catch(() => {});
+    };
+    beat();
+    const timer = window.setInterval(beat, 10000);
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") beat();
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, [sessionId]);
+  return null;
 }
 
 function SessionInfoView(props: any): React.ReactElement {

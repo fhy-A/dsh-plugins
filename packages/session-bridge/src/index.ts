@@ -370,16 +370,35 @@ export function apply(ctx: any): void {
   };
 
   const away = () => {
-    const last = heartbeats.get("__global__") ?? 0;
+    let last = 0;
+    for (const t of heartbeats.values()) if (t > last) last = t;
     return Date.now() - last > AWAY_MS;
   };
 
-  const maybeNotify = (kind: string, title: string, text: string) => {
+  const currentlyViewedSession = (): string => {
+    let best = "";
+    let bestAt = 0;
+    for (const [sid, t] of heartbeats) {
+      if (sid === "__global__") continue;
+      if (t > bestAt) { bestAt = t; best = sid; }
+    }
+    return best;
+  };
+
+  /** Notify when the user is away from the page OR looking at another session. */
+  const shouldNotifyFor = (sessionId: string) => {
+    if (away()) return true;
+    const viewed = currentlyViewedSession();
+    return viewed !== "" && viewed !== sessionId;
+  };
+
+  const maybeNotify = (kind: string, title: string, text: string, sessionId?: string) => {
     const now = Date.now();
     const last = lastNotifyAt.get(kind) ?? 0;
     if (now - last < NOTIFY_DEDUP_MS) return;
+    if (sessionId !== undefined && !shouldNotifyFor(sessionId)) return;
     lastNotifyAt.set(kind, now);
-    if (away()) notifyWindows(title, text);
+    notifyWindows(title, text);
   };
 
   const sessionLabel = (session: any) => {
@@ -430,8 +449,16 @@ export function apply(ctx: any): void {
     ctx.effect(() => ctx.webServer.register({
       kind: "exact",
       path: "/api/session-bridge/heartbeat",
-      handler: async (_req: any, res: any) => {
-        heartbeats.set("__global__", Date.now());
+      handler: async (req: any, res: any) => {
+        let sessionId = "";
+        try {
+          const chunks: Buffer[] = [];
+          for await (const chunk of req) chunks.push(chunk as Buffer);
+          const raw = Buffer.concat(chunks).toString("utf8");
+          const parsed = JSON.parse(raw || "{}");
+          if (typeof parsed?.sessionId === "string") sessionId = parsed.sessionId;
+        } catch { /* keep global */ }
+        heartbeats.set(sessionId === "" ? "__global__" : sessionId, Date.now());
         const body = JSON.stringify({ ok: true });
         res.writeHead(200, { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(body) });
         res.end(body);
@@ -460,16 +487,16 @@ export function apply(ctx: any): void {
         pendingCompletes.delete(key);
         const title = sessionTitleOf(session);
         const preview = replyPreviewOf(session);
-        maybeNotify("completed", "DSH · 任务完成 · " + title, preview === "" ? label + " 的任务已完成。" : preview);
+        maybeNotify("completed", "DSH · 任务完成 · " + title, preview === "" ? label + " 的任务已完成。" : preview, key);
       }, COMPLETE_DELAY_MS);
       pendingCompletes.set(key, timer);
     } else if (reason === "error" || reason === "max-tokens" || reason === "interrupted") {
       const title = sessionTitleOf(session);
       const preview = replyPreviewOf(session);
-      maybeNotify("failed", "DSH · 任务失败 · " + title, preview === "" ? label + " 的任务出错（" + reason + "）。" : preview);
+      maybeNotify("failed", "DSH · 任务失败 · " + title, preview === "" ? label + " 的任务出错（" + reason + "）。" : preview, session?.id);
     } else if (reason === "blocked") {
       const title = sessionTitleOf(session);
-      maybeNotify("blocked", "DSH · 需要处理 · " + title, label + " 的任务被阻塞，需要你处理。");
+      maybeNotify("blocked", "DSH · 需要处理 · " + title, label + " 的任务被阻塞，需要你处理。", session?.id);
     }
   });
 
