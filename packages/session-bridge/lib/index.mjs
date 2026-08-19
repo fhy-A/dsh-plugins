@@ -303,9 +303,8 @@ function apply(ctx) {
 						activeAt: lastEvent?.time ?? cacheRow?.rows?.sessionListMetadata?.val?.lastPromptAt ?? null,
 						file: path.join(home, "sessions", encodeSessionDir(cwd), sessionId, "session.jsonl.zstd"),
 						stats,
-						context: cp ?? cb ?? null,
-						contextWindow: cp?.contextWindow ?? null,
-						surfaceTokens: cp?.surfaceTokens ?? null
+						context: cp ?? null,
+						contextBreakdown: cb ?? null
 					};
 				}
 			} catch (e) {

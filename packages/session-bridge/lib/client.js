@@ -65,8 +65,13 @@ window.__ModuleLoader__.load({
 			"input": "总输入",
 			"output": "输出",
 			"cacheRead": "缓存读取",
+			"cacheHit": "缓存命中",
 			"context": "上下文",
 			"current": "当前",
+			"contextUsed": "上下文已用",
+			"systemPrompt": "系统提示词",
+			"tools": "工具",
+			"messages": "对话消息",
 			"copied": "已复制",
 			"copy": "复制",
 			"noSession": "未绑定会话",
@@ -94,8 +99,13 @@ window.__ModuleLoader__.load({
 			"input": "Input",
 			"output": "Output",
 			"cacheRead": "Cache read",
+			"cacheHit": "Cache hit",
 			"context": "Context",
 			"current": "Current",
+			"contextUsed": "Context used",
+			"systemPrompt": "System prompt",
+			"tools": "Tools",
+			"messages": "Messages",
 			"copied": "Copied",
 			"copy": "Copy",
 			"noSession": "No session bound",
@@ -483,9 +493,29 @@ window.__ModuleLoader__.load({
 			if (!sessionId) return react.default.createElement("div", { className: "sb-info-root" }, react.default.createElement("span", { className: "sb-info-hint" }, t("noSession")));
 			if (error && !info) return react.default.createElement("div", { className: "sb-info-root" }, react.default.createElement("span", { className: "sb-info-error" }, t("loadFailed") + " · " + error));
 			const s = info?.stats;
-			const contextWindow = Number(info?.contextWindow) || 0;
-			const surfaceTokens = Number(info?.surfaceTokens) || 0;
-			const contextText = contextWindow > 0 ? Math.round(surfaceTokens / contextWindow * 1e3) / 10 + "%（" + surfaceTokens.toLocaleString("en-US") + " / " + contextWindow.toLocaleString("en-US") + "）" : info?.context ? (Number(info.context.messageTokens ?? 0) + Number(info.context.systemTokens ?? 0) + Number(info.context.toolsTokens ?? 0)).toLocaleString("en-US") + " tokens" : "-";
+			const billedInput = (s?.tokens?.input ?? 0) + (s?.tokens?.cacheRead ?? 0) + (s?.tokens?.cacheWrite ?? 0);
+			const totalTokens = billedInput + (s?.tokens?.output ?? 0);
+			const cacheHitPct = billedInput > 0 ? Math.round((s?.tokens?.cacheRead ?? 0) / billedInput * 100) : null;
+			const pressure = info?.context ?? {};
+			const breakdown = info?.contextBreakdown ?? {};
+			const usedTokens = Number(pressure.projectedTokens ?? pressure.pressureTokens) || 0;
+			const contextWindow = Number(pressure.contextWindow) || 0;
+			const contextPercent = contextWindow > 0 ? Math.min(100, Math.round(usedTokens / contextWindow * 100)) : null;
+			const contextTotal = contextWindow > 0 ? "~" + fmtNum(usedTokens) + " / " + fmtNum(contextWindow) : "-";
+			const breakdownRows = [
+				InfoRow({
+					k: t("systemPrompt"),
+					v: "~" + fmtNum(breakdown.systemTokens)
+				}),
+				InfoRow({
+					k: t("tools"),
+					v: "~" + fmtNum(breakdown.toolsTokens)
+				}),
+				InfoRow({
+					k: t("messages"),
+					v: "~" + fmtNum(breakdown.messageTokens)
+				})
+			];
 			return react.default.createElement("div", { className: "sb-info-root" }, react.default.createElement("button", {
 				type: "button",
 				className: "sb-info-refresh",
@@ -526,20 +556,26 @@ window.__ModuleLoader__.load({
 				v: fmtNum(s?.messages?.tool)
 			})), react.default.createElement("section", { className: "sb-info-section" }, react.default.createElement("span", { className: "sb-info-label" }, t("tokens")), InfoRow({
 				k: t("total"),
-				v: fmtNum(s?.tokens?.total)
+				v: fmtNum(totalTokens)
 			}), InfoRow({
 				k: t("input"),
-				v: fmtNum(s?.tokens?.input)
+				v: fmtNum(billedInput)
 			}), InfoRow({
 				k: t("output"),
 				v: fmtNum(s?.tokens?.output)
 			}), InfoRow({
 				k: t("cacheRead"),
 				v: fmtNum(s?.tokens?.cacheRead)
+			}), InfoRow({
+				k: t("cacheHit"),
+				v: cacheHitPct !== null ? cacheHitPct + "%" : "-"
 			})), react.default.createElement("section", { className: "sb-info-section" }, react.default.createElement("span", { className: "sb-info-label" }, t("context")), InfoRow({
+				k: t("contextUsed"),
+				v: contextPercent !== null ? contextPercent + "%" : "-"
+			}), InfoRow({
 				k: t("current"),
-				v: contextText
-			})), react.default.createElement("span", { className: "sb-info-hint" }, info?.live ? t("live") : t("notLoaded")));
+				v: contextTotal
+			}), ...breakdownRows), react.default.createElement("span", { className: "sb-info-hint" }, info?.live ? t("live") : t("notLoaded")));
 		}
 		//#endregion
 		exports.apply = apply;
