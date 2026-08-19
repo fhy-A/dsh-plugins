@@ -440,7 +440,7 @@ input[type="search"] {
 				const applyCaretTheme = () => {
 					const root = document.documentElement;
 					const scheme = root.style.colorScheme || (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
-					root.style.setProperty("--sb-caret-color", scheme === "dark" ? "#dbe4ff" : "#3b5bdb");
+					root.style.setProperty("--sb-caret-color", scheme === "dark" ? "#ffffff" : "#3b5bdb");
 				};
 				applyCaretTheme();
 				let caretTimer = null;
